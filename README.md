@@ -9,3 +9,4 @@ Downloads media linked by posts from Pushshift subreddit submission Zstandard ar
 ### Code Snippets
 - https://github.com/obskyr/khinsider
 - https://github.com/Watchful1/PushshiftDumps
+- https://stackoverflow.com/questions/1392413/calculating-a-directorys-size-using-python
