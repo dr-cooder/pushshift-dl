@@ -169,6 +169,7 @@ def main() -> int:
     download_basedirname = os.path.abspath(os.path.realpath(download_basedirname))
 
     bookmark = ''
+    bookmark_changed = False
     bookmark_not_reached = True
     bookmark_file_path = os.path.join(download_basedirname, 'bookmark.txt')
     try:
@@ -230,6 +231,7 @@ def main() -> int:
                         download_main_ext = re.split(r'[^0-9A-Za-z]', download_main_ext)[0]
                         if simple_download(download_dirname, download_fileroot, download_main_ext, download_main_src):
                             bookmark = post_id
+                            bookmark_changed = True
                     else:
                         total_post_count += 1
 
@@ -250,6 +252,7 @@ def main() -> int:
                         all_went_well = all_went_well and simple_download(download_dirname, '{}_{}'.format(download_fileroot, str(image_number).zfill(2)), ext, 'https://i.redd.it/{}.{}'.format(media_id, ext))
                     if all_went_well:
                         bookmark = post_id
+                        bookmark_changed = True
                 else:
                     total_post_count += 1
 
@@ -276,6 +279,7 @@ def main() -> int:
                             ydl.download([dash_url])
                             print('Saved')
                             bookmark = post_id
+                            bookmark_changed = True
                         except Exception as e:
                             exc_info = e.exc_info
                             if isinstance(exc_info, tuple):
@@ -297,18 +301,17 @@ def main() -> int:
         print('Bookmarked post not found!')
         return 1
     elif download_mode:
-        if bookmark_not_reached:
-            print('Interrupted before post {} was reached; no downloads performed'.format(bookmark))
-        else:
-            # In download mode and the previous bookmark was reached, i.e.
-            # the bookmark will be updated, and the download progress will be logged
+        if bookmark_changed:
             with open(bookmark_file_path, 'w') as bookmark_file:
                 bookmark_file.write(bookmark)
-            print(time.ctime())
-            if not_interrupted:
-                print('!!! ALL DONE !!!')
-            else:
-                print('Left off at post {}'.format(bookmark))
+            print('Wrote to bookmark file')
+        else:
+            print('Bookmark unchanged')
+        print(time.ctime())
+        if not_interrupted:
+            print('!!! ALL DONE !!!')
+        else:
+            print('Left off at post {}'.format(bookmark))
     elif not_interrupted:
         # In estimate mode and both the bookmark and the end of the archive
         # were reached, i.e. the estimate can and will be made
