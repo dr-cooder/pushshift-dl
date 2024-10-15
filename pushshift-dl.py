@@ -34,6 +34,14 @@ REDDIT_LAUNCH_DAY = 23
 REDDIT_LAUNCH_MONTH = 6
 REDDIT_LAUNCH_YEAR = 2005
 
+class NoLog(object):
+    @staticmethod
+    def warning(content: str) -> None: pass
+    @staticmethod
+    def debug(content: str) -> None: pass
+    @staticmethod
+    def error(content: str) -> None: pass
+
 def chain_get(parent, *keys):
     child = parent
     try:
@@ -94,15 +102,15 @@ def read_and_decode(reader, chunk_size, max_window_size, previous_chunk=None, by
 	except UnicodeDecodeError:
 		if bytes_read > max_window_size:
 			raise UnicodeError(f'Unable to decode frame after reading {bytes_read:,} bytes')
-		log.info(f'Decoding error with {bytes_read:,} bytes, reading another chunk')
+		print(f'Decoding error with {bytes_read:,} bytes, reading another chunk')
 		return read_and_decode(reader, chunk_size, max_window_size, chunk, bytes_read)
 
 def read_lines_zst(file_name):
 	with open(file_name, 'rb') as file_handle:
 		buffer = ''
-		reader = zstandard.ZstdDecompressor(max_window_size=2**31).stream_reader(file_handle)
+		reader = zstandard.ZstdDecompressor(max_window_size=2**28).stream_reader(file_handle)
 		while True:
-			chunk = read_and_decode(reader, 2**27, (2**29) * 2)
+			chunk = read_and_decode(reader, 2**24, 2**26)
 			if not chunk:
 				break
 			lines = (buffer + chunk).split('\n')
@@ -194,10 +202,11 @@ def main() -> int:
             print('Please download some files from this archive before trying to estimate the remaining space needed!')
             return 1
         else:
-            print('Estimating remaining needed space...')
+            print('Checking space used...')
             current_post_count = 0
             total_post_count = 0
             current_total_size = folder_size(download_basedirname)
+            print('Checking archive progress...')
 
         for line in read_lines_zst(zst_full_filename):
             data = json.loads(line)
@@ -268,9 +277,8 @@ def main() -> int:
                     download_main_abspath = os.path.join(download_dirname, download_main_filename)
                     print('Downloading {} from {}'.format(download_main_filename, dash_url))
                     ydl_opts = {
-                        'noprogress': True,
+                        'logger': NoLog,
                         'outtmpl': download_main_abspath,
-                        'quiet': True,
                         'continuedl': False,
                         'overwrites': True
                     }
@@ -283,8 +291,12 @@ def main() -> int:
                         except Exception as e:
                             exc_info = e.exc_info
                             if isinstance(exc_info, tuple):
-                                if exc_info[1].status != 403:
-                                    raise e
+                                exc_info_1 = exc_info[1]
+                                if exc_info_1:
+                                    status_code = exc_info_1.status
+                                    print('{} error'.format(status_code))
+                                    if status_code != 403:
+                                        raise e
                             else:
                                 raise e
                 else:
