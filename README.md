@@ -1,5 +1,5 @@
 # Pushshift Media Downloader
-Downloads media linked by posts from Pushshift subreddit submission Zstandard archives (currently only supports media hosted by Reddit itself, i.e. no Imgur, YouTube, etc.), organized by UTC creation date.
+Downloads media linked by posts from Pushshift subreddit submission Zstandard archives (currently only supports media hosted by Reddit and Imgur), organized by UTC creation date.
 ## Usage
 1. Get the "submissions" Zstandard archive of the subreddit of choice. I recommend downloading it from REDARCS: https://the-eye.eu/redarcs/
 2. Run `pushshift-dl.py path/to/subreddit_submissions.zst`
