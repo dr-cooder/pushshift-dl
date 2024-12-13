@@ -2,13 +2,13 @@
 
 # TODO: Auto-install modules
 import argparse
-from bs4 import BeautifulSoup
 from calendar import monthrange
 from datetime import datetime
 import html
 import json
 import math
 import os
+from random_user_agent.user_agent import UserAgent
 import re
 import requests
 import sys
@@ -30,15 +30,7 @@ except ImportError:
 REDARCS_SUBMISSIONS_FILE_ENDING = '_submissions.zst'
 REDARCS_SUBMISSIONS_FILE_ENDING_LENGTH = len(REDARCS_SUBMISSIONS_FILE_ENDING)
 
-# https://en.wikipedia.org/wiki/Reddit
-REDDIT_LAUNCH_DAY = 23
-REDDIT_LAUNCH_MONTH = 6
-REDDIT_LAUNCH_YEAR = 2005
-
 IMGUR_CLIENT_ID = '546c25a59c58ad7'
-# TODO: Modifying this seems to circumvent Imgur's rate limiting! https://pypi.org/project/random-user-agent/
-IMGUR_NECESSARY_HEADERS = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/133.0' }
-IMGUR_MEDIA_PATTERN = r'^https?:\/\/i\.imgur\.com\/([a-zA-Z0-9]+\.(jpg|jpeg|png|gif|mp4))'
 
 IS_NOT_A_BOOKMARK = 0
 IS_A_BOOKMARK = 1
@@ -107,17 +99,6 @@ class NoLog(object):
     @staticmethod
     def error(content: str) -> None: pass
 
-class Silence(object):
-    def __enter__(self):
-        self._stdout = sys.stdout
-        self._stderr = sys.stderr
-        sys.stdout = open(os.devnull, 'w')
-        sys.stderr = open(os.devnull, 'w')
-    
-    def __exit__(self, *_):
-        sys.stdout = self._stdout
-        sys.stderr = self._stderr
-
 class FileManager(object):
     def __init__(self, download_basedirname):
         bookmark_file_path = os.path.join(download_basedirname, 'bookmark.txt')
@@ -142,13 +123,14 @@ class FileManager(object):
         self.__bookmarks = bookmarks
         self.__bookmarks_changed = False
         self.__download_basedirname = download_basedirname
-        self.__imgur_available_str = 'Imgur is off limits'
-        self.__imgur_available_timestamp = 0
         self.__last_bookmark = None if started_without_bookmarks else max(bookmarks)
         self.__prepared_year_folders = set()
         self.__started_done = started_with_end_of_archive_reached and started_without_bookmarks
         self.__started_with_end_of_archive_reached = started_with_end_of_archive_reached
         self.__started_without_bookmarks = started_without_bookmarks
+        self.__user_agent_rotator = UserAgent()
+        self.__change_user_agent()
+        print('User agent is "{}"'.format(self.__user_agent))
 
     @property
     def initial_status(self):
@@ -165,6 +147,9 @@ class FileManager(object):
     @property
     def started_without_bookmarks(self):
         return self.__started_without_bookmarks
+    
+    def __change_user_agent(self):
+        self.__user_agent = self.__user_agent_rotator.get_random_user_agent()
 
     def is_bookmark(self, value):
         # TODO: This could probably be more efficient
@@ -197,54 +182,40 @@ class FileManager(object):
 
     def __handle_download(self, year, line_number, download_function, *args, **kwargs):
         if year not in self.__prepared_year_folders:
-            if year >= REDDIT_LAUNCH_YEAR:
-                print('Preparing download folders for the year {}'.format(year))
-                it_is_reddits_launch_year_my_dudes = year == REDDIT_LAUNCH_YEAR
-                if it_is_reddits_launch_year_my_dudes:
-                    start_month = REDDIT_LAUNCH_MONTH
-                else:
-                    start_month = 1
-                for month in range(start_month, 13):
-                    if it_is_reddits_launch_year_my_dudes and month == REDDIT_LAUNCH_MONTH:
-                        start_day = REDDIT_LAUNCH_DAY
-                    else:
-                        start_day = 1
-                    end_day = monthrange(year, month)[1] + 1
-                    for day in range(start_day, end_day):
-                        day_dir = os.path.join(self.__download_basedirname, str(year), str(month).zfill(2), str(day).zfill(2))
-                        if not os.path.isdir(day_dir):
-                            os.makedirs(day_dir)
-                self.__prepared_year_folders.add(year)
+            print('Preparing download folders for the year {}'.format(year))
+            for month in range(1, 13):
+                end_day = monthrange(year, month)[1] + 1
+                for day in range(1, end_day):
+                    day_dir = os.path.join(self.__download_basedirname, str(year), str(month).zfill(2), str(day).zfill(2))
+                    if not os.path.isdir(day_dir):
+                        os.makedirs(day_dir)
+            self.__prepared_year_folders.add(year)
         download_function(*args, **kwargs)
         self.__remove_bookmark(line_number)
     
     def __try_to_get(self, src, is_imgur=False):
         src_secure = re.sub(r'^(https?:\/\/)?', 'https://', src)
-        if is_imgur and datetime.now().timestamp() < self.__imgur_available_timestamp:
-            raise Exception(self.__imgur_available_str)
-        response = requests.get(src_secure, headers=IMGUR_NECESSARY_HEADERS if is_imgur else None)
-        status_code = response.status_code
-        if is_imgur and (status_code == 403 or status_code == 429 or status_code == 503):
-            imgur_available_timestamp = datetime.now().timestamp() + 600 # 3600
-            self.__imgur_available_timestamp = imgur_available_timestamp
-            imgur_available_str = 'Imgur is off limits until {}'.format(datetime.fromtimestamp(imgur_available_timestamp).strftime("%H:%M:%S, on %a, %d %b %Y"))
-            self.__imgur_available_str = imgur_available_str
-            raise Exception(imgur_available_str)
-        elif response.url == 'https://i.imgur.com/removed.png':
-            print('Imgur image not found')
-            return None
-        elif response.url == 'https://imgur.com/':
-            print('Imgur page not found')
-            return None
-        elif status_code == 200:
-            return response.content
-        else:
-            error_message = '{} error'.format(status_code)
-            if status_code == 404:
-                print(error_message)
+        while True:
+            response = requests.get(src_secure, headers = { 'User-Agent': self.__user_agent } if is_imgur else None)
+            status_code = response.status_code
+            if is_imgur and (status_code == 403 or status_code == 429 or status_code == 503):
+                self.__change_user_agent()
+                print('Got {} error; Switched user agent to "{}"; Retrying download'.format(status_code, self.__user_agent))
+            elif response.url == 'https://i.imgur.com/removed.png':
+                print('Imgur image not found')
                 return None
+            elif response.url == 'https://imgur.com/':
+                print('Imgur page not found')
+                return None
+            elif status_code == 200:
+                return response.content
             else:
-                raise Exception(error_message)
+                error_message = '{} error'.format(status_code)
+                if status_code == 404:
+                    print(error_message)
+                    return None
+                else:
+                    raise Exception(error_message)
     
     def try_to_get(self, line_number, src, is_imgur=False):
         content = self.__try_to_get(src, is_imgur=is_imgur)
@@ -269,27 +240,29 @@ class FileManager(object):
     def simple_download(self, year, line_number, download_dirname, download_fileroot, download_main_ext, download_main_src, is_imgur=False):
         return self.__handle_download(year, line_number, self.__simple_download, download_dirname, download_fileroot, download_main_ext, download_main_src, is_imgur=is_imgur)
 
-    def __imgur_gallery_download(self, download_dirname, download_fileroot, media_infos):
+    def __imgur_page_download(self, download_dirname, download_fileroot, media_infos):
         all_went_well = True
+        only_one_media_info = len(media_infos) == 1
         for media_number, media_info in enumerate(media_infos, 1):
             media_url = chain_get(media_info, 'url')
-            media_url_match = re.match(IMGUR_MEDIA_PATTERN, media_url)
+            media_url_match = re.match(r'^https?:\/\/(i\.)?imgur\.com\/([a-zA-Z0-9]+\.(jpg|jpeg|png|gif|mp4))', media_url)
             if not media_url_match:
                 continue
             # TODO: zfill more?
             all_went_well = all_went_well and self.__simple_download(
                 download_dirname,
-                '{}_{}'.format(download_fileroot, str(media_number).zfill(2)),
-                media_url_match.group(2),
+                download_fileroot if only_one_media_info else '{}_{}'.format(download_fileroot, str(media_number).zfill(2)),
+                media_url_match.group(3),
                 media_url,
                 is_imgur=True)
         return all_went_well
 
-    def imgur_gallery_download(self, year, line_number, download_dirname, download_fileroot, media_infos):
-        return self.__handle_download(year, line_number, self.__imgur_gallery_download, download_dirname, download_fileroot, media_infos)
+    def imgur_page_download(self, year, line_number, download_dirname, download_fileroot, media_infos):
+        return self.__handle_download(year, line_number, self.__imgur_page_download, download_dirname, download_fileroot, media_infos)
 
     def __reddit_gallery_download(self, download_dirname, download_fileroot, gallery_items):
         all_went_well = True
+        only_one_gallery_item = len(gallery_items) == 1
         for media_number, gallery_item in enumerate(gallery_items, 1):
             media_id = chain_get(gallery_item, 'media_id')
             ext = chain_get(media_metadata, media_id, 'm')
@@ -298,7 +271,7 @@ class FileManager(object):
             ext = ext[ext.rfind('/')+1:]
             all_went_well = all_went_well and self.__simple_download(
                 download_dirname,
-                '{}_{}'.format(download_fileroot, str(media_number).zfill(2)),
+                download_filreoot if only_one_gallery_item else '{}_{}'.format(download_fileroot, str(media_number).zfill(2)),
                 ext,
                 'https://i.redd.it/{}.{}'.format(media_id, ext))
         return all_went_well
@@ -436,76 +409,26 @@ def main() -> int:
                                 current_post_count += 1
                             total_post_count += 1
                     else:
-                        # Imgur gallery
-                        json_unexpected = False
-                        imgur_gallery_match = re.match(r'^https?:\/\/imgur\.com\/(a|gallery)\/([a-zA-Z0-9]+)', url)
-                        if imgur_gallery_match:
+                        # Imgur page (media or album)
+                        imgur_match = re.match(r'^https?:\/\/imgur\.com\/((a|gallery)\/)?([a-zA-Z0-9,]+)($|[^\/a-zA-Z0-9])', url)
+                        if imgur_match:
                             if download_mode:
-                                imgur_gallery_id = imgur_gallery_match.group(2)
-                                print('Downloading info for Imgur gallery {}'.format(imgur_gallery_id))
-                                imgur_gallery_info_content = file_manager.try_to_get(line_number, 'https://api.imgur.com/post/v1/albums/{}?client_id={}&include=media'.format(imgur_gallery_id, IMGUR_CLIENT_ID), is_imgur=True)
-                                if imgur_gallery_info_content:
-                                    media_infos = chain_get(json.loads(imgur_gallery_info_content), 'media')
-                                    if media_infos:
-                                        file_manager.imgur_gallery_download(
-                                            created_year,
-                                            line_number,
-                                            download_dirname,
-                                            download_fileroot,
-                                            media_infos)
-                                    else:
-                                        json_unexpected = True
-                            else:
-                                if last_bookmark_not_reached and line_is_bookmark == IS_NOT_A_BOOKMARK:
-                                    current_post_count += 1
-                                total_post_count += 1
-
-                        # Imgur page
-                        imgur_page_match = re.match(r'^(https?:\/\/imgur\.com\/([a-zA-Z0-9]+)($|[^\/a-zA-Z0-9]))', url)
-                        if json_unexpected or imgur_page_match:
-                            if download_mode:
-                                url_simplified = 'https://imgur.com/gallery/{}'.format(imgur_gallery_id) if json_unexpected else imgur_page_match.group(1)
-                                print('Downloading Imgur page {}'.format(url_simplified))
-                                imgur_page_content = file_manager.try_to_get(line_number, url_simplified, is_imgur=True)
-                                if imgur_page_content:
-                                    # TODO: For some inexplicable reason, downloading from certain (very rare) Imgur page URLs yields the image;
-                                    # if BeautifulSoup fails, this has probably happened, and the filetype can be inferred by the Magic Bytes https://pypi.org/project/pyfsig/
-                                    with Silence():
-                                        imgur_page_head = BeautifulSoup(imgur_page_content, 'html.parser').head
-                                    # TODO: Video and image are very similar; DRY better here
-                                    imgur_og_video = imgur_page_head.find('meta', { 'property': 'og:video' })
-                                    if imgur_og_video:
-                                        imgur_video_url = imgur_og_video['content']
-                                        imgur_video_url_match = re.match(IMGUR_MEDIA_PATTERN, imgur_video_url)
-                                        if imgur_video_url_match:
-                                            file_manager.simple_download(
-                                                created_year,
-                                                line_number,
-                                                download_dirname,
-                                                download_fileroot,
-                                                imgur_video_url_match.group(2),
-                                                imgur_video_url,
-                                                is_imgur=True)
-                                        else:
-                                            raise Exception('Unexpected URL format {}'.format(imgur_video_url))
-                                    else: # If there is a video, this is the thumbnail
-                                        imgur_og_image = imgur_page_head.find('meta', { 'property': 'og:image' })
-                                        if imgur_og_image:
-                                            imgur_image_url = imgur_og_image['content']
-                                            imgur_image_url_match = re.match(IMGUR_MEDIA_PATTERN, imgur_image_url)
-                                            if imgur_image_url_match:
-                                                file_manager.simple_download(
-                                                    created_year,
-                                                    line_number,
-                                                    download_dirname,
-                                                    download_fileroot,
-                                                    imgur_image_url_match.group(2),
-                                                    imgur_image_url,
-                                                    is_imgur=True)
-                                            else:
-                                                raise Exception('Unexpected URL format {}'.format(imgur_image_url))
-                                        else:
-                                            print('No image or video found in page')
+                                endpoint_name = 'album' if imgur_match.group(2) else 'media'
+                                imgur_ids = imgur_match.group(3).split(',')
+                                media_infos = list()
+                                for imgur_id in imgur_ids:
+                                    print('Downloading info for Imgur {} {}'.format(endpoint_name, imgur_id))
+                                    imgur_gallery_info_content = file_manager.try_to_get(line_number, 'https://api.imgur.com/post/v1/{}/{}?client_id={}&include=media'.format(endpoint_name, imgur_id, IMGUR_CLIENT_ID), is_imgur=True)
+                                    if imgur_gallery_info_content:
+                                        current_media_infos = chain_get(json.loads(imgur_gallery_info_content), 'media')
+                                        if current_media_infos and isinstance(current_media_infos, list):
+                                            media_infos.extend(current_media_infos)
+                                file_manager.imgur_page_download(
+                                    created_year,
+                                    line_number,
+                                    download_dirname,
+                                    download_fileroot,
+                                    media_infos)
                             else:
                                 if last_bookmark_not_reached and line_is_bookmark == IS_NOT_A_BOOKMARK:
                                     current_post_count += 1
