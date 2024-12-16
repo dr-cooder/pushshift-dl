@@ -244,17 +244,21 @@ class FileManager(object):
         self.__remove_bookmark(line_number)
         return content
 
+    # TODO: '.part' SUFFIX!!!
     def __simple_download(self, download_dirname, download_fileroot, download_ext, download_src, is_imgur=False):
         content = None
         download_filename = '{}.{}'.format(download_fileroot, download_ext)
+        download_part_filename = '{}.part'.format(download_filename)
         download_abspath = os.path.join(download_dirname, download_filename)
+        download_part_abspath = os.path.join(download_dirname, download_part_filename)
         if not os.path.isfile(download_abspath):
             print('Downloading {} from {}'.format(download_filename, download_src))
             iter_content = self.__try_to_get(download_src, is_imgur=is_imgur, stream=True)
             if iter_content:
-                with open(download_abspath, 'wb') as download:
+                with open(download_part_abspath, 'wb') as download:
                     for chunk in iter_content:
                         download.write(chunk)
+                os.rename(download_part_abspath, download_abspath)
                 print('Saved')
         else:
             print('{} has already been downloaded'.format(download_filename))
