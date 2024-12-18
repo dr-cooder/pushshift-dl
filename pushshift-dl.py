@@ -175,7 +175,7 @@ class FileManager(object):
             self.__bookmarks_changed = True
     
     def write_bookmark(self, not_interrupted):
-        if self.__bookmarks_changed:
+        if self.__bookmarks_changed or (not_interrupted and not self.__started_with_end_of_archive_reached):
             with open(self.__bookmark_file_path, 'w') as bookmark_file:
                 bookmark_file.write('\n'.join(map(str, sorted(self.__bookmarks))))
                 if not_interrupted or self.__started_with_end_of_archive_reached:
@@ -244,9 +244,8 @@ class FileManager(object):
         self.__remove_bookmark(line_number)
         return content
 
-    # TODO: '.part' SUFFIX!!!
     def __simple_download(self, download_dirname, download_fileroot, download_ext, download_src, is_imgur=False):
-        content = None
+        iter_content = None
         download_filename = '{}.{}'.format(download_fileroot, download_ext)
         download_part_filename = '{}.part'.format(download_filename)
         download_abspath = os.path.join(download_dirname, download_filename)
@@ -262,49 +261,63 @@ class FileManager(object):
                 print('Saved')
         else:
             print('{} has already been downloaded'.format(download_filename))
-        return bool(content)
+        return bool(iter_content)
     
     def simple_download(self, year, line_number, download_dirname, download_fileroot, download_ext, download_src, is_imgur=False):
         return self.__handle_download(year, line_number, self.__simple_download, download_dirname, download_fileroot, download_ext, download_src, is_imgur=is_imgur)
 
     def __imgur_page_download(self, download_dirname, download_fileroot, media_infos):
         all_went_well = True
+        first_exception = None
         only_one_media_info = len(media_infos) == 1
         for media_number, media_info in enumerate(media_infos, 1):
-            media_url = chain_get(media_info, 'url')
-            media_url_match = re.match(r'^https?:\/\/(i\.)?imgur\.com\/([a-zA-Z0-9]+\.(jpg|jpeg|png|gif|mp4))', media_url)
-            if not media_url_match:
-                continue
-            # TODO: zfill more?
-            all_went_well = all_went_well and self.__simple_download(
-                download_dirname,
-                download_fileroot if only_one_media_info else '{}_{}'.format(download_fileroot, str(media_number).zfill(2)),
-                media_url_match.group(3),
-                media_url,
-                is_imgur=True)
+            try:
+                media_url = chain_get(media_info, 'url')
+                media_url_match = re.match(r'^https?:\/\/(i\.)?imgur\.com\/([a-zA-Z0-9]+\.(jpg|jpeg|png|gif|mp4))', media_url)
+                if not media_url_match:
+                    continue
+                # TODO: zfill more?
+                all_went_well = self.__simple_download(
+                    download_dirname,
+                    download_fileroot if only_one_media_info else '{}_{}'.format(download_fileroot, str(media_number).zfill(2)),
+                    media_url_match.group(3),
+                    media_url,
+                    is_imgur=True) and all_went_well
+            except Exception as e:
+                if not first_exception:
+                    first_exception = e
+        if first_exception:
+            raise first_exception
         return all_went_well
 
     def imgur_page_download(self, year, line_number, download_dirname, download_fileroot, media_infos):
         return self.__handle_download(year, line_number, self.__imgur_page_download, download_dirname, download_fileroot, media_infos)
 
-    def __reddit_gallery_download(self, download_dirname, download_fileroot, gallery_items):
+    def __reddit_gallery_download(self, download_dirname, download_fileroot, gallery_items, media_metadata):
         all_went_well = True
+        first_exception = None
         only_one_gallery_item = len(gallery_items) == 1
         for media_number, gallery_item in enumerate(gallery_items, 1):
-            media_id = chain_get(gallery_item, 'media_id')
-            ext = chain_get(media_metadata, media_id, 'm')
-            if not ext:
-                continue
-            ext = ext[ext.rfind('/')+1:]
-            all_went_well = all_went_well and self.__simple_download(
-                download_dirname,
-                download_filreoot if only_one_gallery_item else '{}_{}'.format(download_fileroot, str(media_number).zfill(2)),
-                ext,
-                'https://i.redd.it/{}.{}'.format(media_id, ext))
+            try:
+                media_id = chain_get(gallery_item, 'media_id')
+                ext = chain_get(media_metadata, media_id, 'm')
+                if not ext:
+                    continue
+                ext = ext[ext.rfind('/')+1:]
+                all_went_well = self.__simple_download(
+                    download_dirname,
+                    download_filreoot if only_one_gallery_item else '{}_{}'.format(download_fileroot, str(media_number).zfill(2)),
+                    ext,
+                    'https://i.redd.it/{}.{}'.format(media_id, ext)) and all_went_well
+            except Exception as e:
+                if not first_exception:
+                    first_exception = e
+        if first_exception:
+            raise first_exception
         return all_went_well
     
-    def reddit_gallery_download(self, year, line_number, download_dirname, download_fileroot, gallery_items):
-        return self.__handle_download(year, line_number, self.__reddit_gallery_download, download_dirname, download_fileroot, gallery_items)
+    def reddit_gallery_download(self, year, line_number, download_dirname, download_fileroot, gallery_items, media_metadata):
+        return self.__handle_download(year, line_number, self.__reddit_gallery_download, download_dirname, download_fileroot, gallery_items, media_metadata)
 
     def __reddit_video_download(self, download_dirname, download_fileroot, dash_url_escaped):
         # TODO: Mix with storyboard if video is not available, like RapidSave does
@@ -481,7 +494,8 @@ def main() -> int:
                             line_number,
                             download_dirname,
                             download_fileroot,
-                            gallery_items)
+                            gallery_items,
+                            media_metadata)
                     else:
                         estimator.increment(line_could_be_a_downloaded_post)
 
