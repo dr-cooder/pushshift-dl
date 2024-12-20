@@ -211,11 +211,14 @@ class FileManager(object):
         self.__remove_bookmark(line_number)
     
     def __try_to_get(self, src, is_imgur=False, stream=False):
+        # if not is_imgur:
+        #     print('Not Imgur; skipping')
+        #     return None
         src_secure = re.sub(r'^(https?:\/\/)?', 'https://', src)
         if self.__user_agent_not_initialized and is_imgur:
             self.__initialize_user_agent()
         while True:
-            response = requests.get(src_secure, headers = { 'User-Agent': self.__user_agent } if is_imgur else None)
+            response = requests.get(src_secure, headers = { 'User-Agent': self.__user_agent } if is_imgur else None, stream = stream)
             status_code = response.status_code
             if is_imgur and (status_code == 403 or status_code == 429 or status_code == 503):
                 self.__change_user_agent()
@@ -240,7 +243,7 @@ class FileManager(object):
                     raise Exception(error_message)
     
     def try_to_get(self, line_number, src, is_imgur=False, stream=False):
-        content = self.__try_to_get(src, is_imgur=is_imgur)
+        content = self.__try_to_get(src, is_imgur=is_imgur, stream=stream)
         self.__remove_bookmark(line_number)
         return content
 
@@ -250,7 +253,9 @@ class FileManager(object):
         download_part_filename = '{}.part'.format(download_filename)
         download_abspath = os.path.join(download_dirname, download_filename)
         download_part_abspath = os.path.join(download_dirname, download_part_filename)
-        if not os.path.isfile(download_abspath):
+        if os.path.isfile(download_abspath):
+            print('{} has already been downloaded'.format(download_filename))
+        else:
             print('Downloading {} from {}'.format(download_filename, download_src))
             iter_content = self.__try_to_get(download_src, is_imgur=is_imgur, stream=True)
             if iter_content:
@@ -259,8 +264,6 @@ class FileManager(object):
                         download.write(chunk)
                 os.rename(download_part_abspath, download_abspath)
                 print('Saved')
-        else:
-            print('{} has already been downloaded'.format(download_filename))
         return bool(iter_content)
     
     def simple_download(self, year, line_number, download_dirname, download_fileroot, download_ext, download_src, is_imgur=False):
@@ -320,6 +323,11 @@ class FileManager(object):
         return self.__handle_download(year, line_number, self.__reddit_gallery_download, download_dirname, download_fileroot, gallery_items, media_metadata)
 
     def __reddit_video_download(self, download_dirname, download_fileroot, dash_url_escaped):
+        download_likely_filename = '{}.mp4'.format(download_fileroot)
+        download_likely_abspath = os.path.join(download_dirname, download_likely_filename)
+        if os.path.isfile(download_likely_abspath):
+            print('{} has already been downloaded'.format(download_filename))
+            return False
         # TODO: Mix with storyboard if video is not available, like RapidSave does
         dash_url = html.unescape(dash_url_escaped)
         download_filename = '{}.%(ext)s'.format(download_fileroot)
@@ -483,6 +491,7 @@ def main() -> int:
                                     media_infos)
                             else:
                                 estimator.increment(line_could_be_a_downloaded_post)
+                # continue
 
                 # Reddit gallery
                 gallery_items = chain_get(data, 'gallery_data', 'items')
