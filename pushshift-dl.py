@@ -163,11 +163,12 @@ class FileManager(object):
         # TODO: This could probably be more efficient
         return IS_LAST_BOOKMARK if value == self.__last_bookmark and not self.__started_with_end_of_archive_reached else IS_A_BOOKMARK if value in self.__bookmarks else IS_NOT_A_BOOKMARK
     
-    def add_bookmark(self, value):
+    def add_bookmark(self, value, increment=True):
         if value not in self.__bookmarks:
             self.__bookmarks_changed = True
         self.__bookmarks.add(value)
-        self.__increment_downloads_since_last_autosave()
+        if increment:
+            self.__increment_downloads_since_last_autosave()
     
     def __remove_bookmark(self, value):
         if value in self.__bookmarks:
@@ -206,8 +207,12 @@ class FileManager(object):
                         os.makedirs(day_dir)
             self.__prepared_year_folders.add(year)
         download_function(*args, **kwargs)
-        # If no error occurred while trying to download, then...
-        self.__increment_downloads_since_last_autosave()
+        # If no error occurred while trying to download, then add the line number to the bookmark
+        # (this increments the finished posts and writes that line number as a progress marker
+        # if the frequency threshold is passed in the case of the program stopping without
+        # a chance to write the bookmarks), then remove the line number in the case
+        # of the program stopping *with* a chance to write the bookmarks
+        self.add_bookmark(line_number)
         self.__remove_bookmark(line_number)
     
     def __try_to_get(self, src, is_imgur=False, stream=False):
@@ -526,7 +531,7 @@ def main() -> int:
     except KeyboardInterrupt as e:
         print()
         print(e)
-        file_manager.add_bookmark(line_number)
+        file_manager.add_bookmark(line_number, increment=False)
         not_interrupted = False
     if download_mode:
         file_manager.write_bookmark(not_interrupted)
