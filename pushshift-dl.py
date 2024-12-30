@@ -331,7 +331,7 @@ class FileManager(object):
         download_likely_filename = '{}.mp4'.format(download_fileroot)
         download_likely_abspath = os.path.join(download_dirname, download_likely_filename)
         if os.path.isfile(download_likely_abspath):
-            print('{} has already been downloaded'.format(download_filename))
+            print('{} has already been downloaded'.format(download_likely_filename))
             return False
         # TODO: Mix with storyboard if video is not available, like RapidSave does
         dash_url = html.unescape(dash_url_escaped)
