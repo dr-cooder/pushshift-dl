@@ -165,8 +165,8 @@ class FileManager(object):
     
     def add_bookmark(self, value, increment=True):
         if value not in self.__bookmarks:
+            self.__bookmarks.add(value)
             self.__bookmarks_changed = True
-        self.__bookmarks.add(value)
         if increment:
             self.__increment_downloads_since_last_autosave()
     
@@ -176,13 +176,15 @@ class FileManager(object):
             self.__bookmarks_changed = True
     
     def write_bookmark(self, not_interrupted):
+        # Right-hand side of "or" statement is for the "END" bookmark being anticipated to be added
         if self.__bookmarks_changed or (not_interrupted and not self.__started_with_end_of_archive_reached):
             with open(self.__bookmark_file_path, 'w') as bookmark_file:
                 bookmark_file.write('\n'.join(map(str, sorted(self.__bookmarks))))
                 if not_interrupted or self.__started_with_end_of_archive_reached:
                     if len(self.__bookmarks) == 0:
-                        print('!!! ALL DONE !!!')
+                        print('All done!')
                     else:
+                        print('Finished with some entries missed')
                         bookmark_file.write('\n')
                     bookmark_file.write(END_BOOKMARK_STRING)
             print('Wrote to bookmark file')
@@ -195,6 +197,7 @@ class FileManager(object):
         if self.__downloads_since_last_autosave >= AUTOSAVE_FREQUENCY:
             self.write_bookmark(False)
             self.__downloads_since_last_autosave %= AUTOSAVE_FREQUENCY
+            self.__bookmarks_changed = False
 
     def __handle_download(self, year, line_number, download_function, *args, **kwargs):
         if year not in self.__prepared_year_folders:
@@ -482,6 +485,7 @@ def main() -> int:
                                 imgur_ids = imgur_match.group(3).split(',')
                                 media_infos = list()
                                 for imgur_id in imgur_ids:
+                                    # TODO: Trim to first 7 characters
                                     print('Downloading info for Imgur {} {}'.format(endpoint_name, imgur_id))
                                     imgur_gallery_info_content = file_manager.try_to_get(line_number, 'https://api.imgur.com/post/v1/{}/{}?client_id={}&include=media'.format(endpoint_name, imgur_id, IMGUR_CLIENT_ID), is_imgur=True)
                                     if imgur_gallery_info_content:
